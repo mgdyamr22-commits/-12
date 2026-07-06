@@ -2472,7 +2472,8 @@ async function startServer() {
   }
 
   serverInstance = app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    // Log server startup for operational monitoring.
+    console.log(`Server running on http://localhost:${PORT}`); // skipcq: JS-0002
   });
 }
 
@@ -2480,7 +2481,8 @@ startServer();
 
 // 6. PROCESS LIFE-CYCLE & RECOVERY MANAGEMENT (CRASH RECOVERY, GRACEFUL SHUTDOWN)
 function handleGracefulShutdown(signal: string) {
-  console.log(`Received ${signal}. Starting graceful shutdown...`);
+  // Logging shutdown initiation for auditing purposes
+  console.log(`Received ${signal}. Starting graceful shutdown...`); // skipcq: JS-0002
   
   // Stop SSE Heartbeat Interval
   clearInterval(sseHeartbeatInterval);
@@ -2498,14 +2500,17 @@ function handleGracefulShutdown(signal: string) {
 
   if (serverInstance) {
     serverInstance.close(() => {
-      console.log('HTTP Server closed cleanly.');
+      // Logging successful HTTP server shutdown
+      console.log('HTTP Server closed cleanly.'); // skipcq: JS-0002
       
       // Force database write flush to disk if there is any pending save
       try {
         db.saveDB();
-        console.log('Database state persisted safely.');
+        // Logging database persistence confirmation
+        console.log('Database state persisted safely.'); // skipcq: JS-0002
       } catch (dbErr) {
-        console.error('Failed to flush database to disk during shutdown:', dbErr);
+        // Logging database flush failure
+        console.error('Failed to flush database to disk during shutdown:', dbErr); // skipcq: JS-0002
       }
       
       process.exit(0);
@@ -2513,7 +2518,8 @@ function handleGracefulShutdown(signal: string) {
     
     // Force exit if server socket doesn't close within 5 seconds
     setTimeout(() => {
-      console.error('Forceful shutdown triggered after timeout.');
+      // Logging forceful shutdown after timeout
+      console.error('Forceful shutdown triggered after timeout.'); // skipcq: JS-0002
       process.exit(1);
     }, 5000);
   } else {

@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>My Google AI Studio App</title>
+    <script>
+      // Detect if we are on a production PHP host (e.g. Laragon, XAMPP, cPanel, Apache)
+      // and redirect automatically to index.php instead of showing a blank index.html
+      const isDevEnv = window.location.hostname.includes('run.app') || 
+                       window.location.hostname.includes('webcontainer') || 
+                       window.location.hostname.includes('stackblitz') || 
+                       window.location.port === '3000';
+      if (!isDevEnv) {
+        window.location.href = 'index.php';
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

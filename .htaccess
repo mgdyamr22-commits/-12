@@ -1,0 +1,11 @@
+# Prioritize index.php over index.html for Apache/cPanel/XAMPP/Laragon
+DirectoryIndex index.php index.html
+
+# Prevent directory listing
+Options -Indexes
+
+# If someone tries to access index.html directly, we can redirect them to index.php
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule ^index\.html$ index.php [R=301,L]
+</IfModule>

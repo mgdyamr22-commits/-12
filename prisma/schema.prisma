@@ -1,0 +1,304 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum UserRole {
+  ADMIN          @map("admin")
+  REPRESENTATIVE @map("representative")
+}
+
+enum CarStatus {
+  AVAILABLE @map("available")
+  RESERVED  @map("reserved")
+}
+
+enum PaymentStatus {
+  PAID           @map("paid")
+  PENDING        @map("pending")
+  PARTIALLY_PAID @map("partially_paid")
+}
+
+enum ReservationStatus {
+  ACTIVE    @map("active")
+  COMPLETED @map("completed")
+  CANCELLED @map("cancelled")
+}
+
+enum SystemStatus {
+  ACTIVE      @map("active")
+  MAINTENANCE @map("maintenance")
+}
+
+model User {
+  id           String        @id @default(uuid())
+  username     String        @unique
+  passwordHash String
+  name         String
+  role         UserRole      @default(REPRESENTATIVE)
+  branchId     String
+  branch       Branch        @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  isDeleted    Boolean       @default(false)
+  
+  // Relations
+  reservationsCreated Reservation[] @relation("CreatedByUser")
+  auditLogs           AuditLog[]
+  carsCreated         Car[]         @relation("CarCreator")
+  carsUpdated         Car[]         @relation("CarUpdater")
+  carsDeleted         Car[]         @relation("CarDeleter")
+
+  @@index([branchId])
+  @@index([username, role])
+}
+
+model Branch {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  location  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  isDeleted Boolean  @default(false)
+
+  // Relations
+  users     User[]
+  cars      Car[]
+
+  @@index([name])
+}
+
+model TechnicalSpecs {
+  id                String   @id @default(uuid())
+  carId             String   @unique
+  car               Car      @relation(fields: [carId], references: [id], onDelete: Cascade)
+  gulfSpecs         Boolean  @default(true)
+  americanSpecs     Boolean  @default(false)
+  europeanSpecs     Boolean  @default(false)
+  fuelConsumption   String // KM/L e.g. "14.5"
+  navigationSystem  Boolean  @default(false)
+  rearCamera        Boolean  @default(false)
+  camera360         Boolean  @default(false)
+  radar             Boolean  @default(false)
+  frontSensors      Boolean  @default(false)
+  rearSensors       Boolean  @default(false)
+  cruiseControl     Boolean  @default(false)
+  adaptiveCruise    Boolean  @default(false)
+  laneAssist        Boolean  @default(false)
+  blindSpot         Boolean  @default(false)
+  appleCarPlay      Boolean  @default(false)
+  androidAuto       Boolean  @default(false)
+  sunroof           Boolean  @default(false)
+  panorama          Boolean  @default(false)
+  leatherSeats      Boolean  @default(false)
+  heatedSeats       Boolean  @default(false)
+  cooledSeats       Boolean  @default(false)
+  seatMemory        Boolean  @default(false)
+  pushButtonStart   Boolean  @default(false)
+  remoteStart       Boolean  @default(false)
+  ledLights         Boolean  @default(false)
+  xenonLights       Boolean  @default(false)
+  numberOfKeys      Int      @default(2)
+  spareTire         Boolean  @default(true)
+  catalog           Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+model SaleDetails {
+  id              String        @id @default(uuid())
+  carId           String        @unique
+  car             Car           @relation(fields: [carId], references: [id], onDelete: Cascade)
+  sellerName      String
+  buyerName       String
+  paymentMethod   String
+  contractNumber  String        @unique
+  invoiceNumber   String        @unique
+  paymentStatus   PaymentStatus @default(PENDING)
+  paidAmount      Decimal       @db.Decimal(12, 2)
+  remainingAmount Decimal       @db.Decimal(12, 2)
+  deliveryMethod  String
+  deliveryDate    DateTime
+  deliveryNotes   String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([contractNumber])
+  @@index([invoiceNumber])
+}
+
+model Car {
+  id                 String          @id @default(uuid())
+  make               String
+  model              String
+  trim               String
+  year               Int
+  color              String
+  interiorColor      String
+  bodyType           String
+  doors              Int
+  seats              Int
+  fuelType           String
+  transmission       String
+  engineCapacity     Int
+  cylinders          Int
+  enginePower        Int
+  drive              String
+  odometer           Int
+  vin                String          @unique
+  plateNumber        String          @unique
+  plateType          String
+  serialNumber       String          @unique
+  registrationNumber String          @unique
+  customsNumber      String          @unique
+  originCountry      String
+  assemblyCountry    String
+  vehicleCondition   String
+  ownershipType      String
+  branchId           String
+  branch             Branch          @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  supplier           String
+  previousOwner      String?
+  costPrice          Decimal         @db.Decimal(12, 2)
+  price              Decimal         @db.Decimal(12, 2)
+  tax                Decimal         @db.Decimal(12, 2)
+  discount           Decimal         @db.Decimal(12, 2) @default(0)
+  finalPrice         Decimal         @db.Decimal(12, 2)
+  currency           String          @default("SAR")
+  entryDate          DateTime        @default(now())
+  exitDate           DateTime?
+  purchaseDate       DateTime
+  saleDate           DateTime?
+  warranty           String
+  warrantyDuration   Int
+  notes              String?
+  status             CarStatus       @default(AVAILABLE)
+  mainImage          String
+
+  // Soft Delete and Metadata Traceability
+  isDeleted          Boolean         @default(false)
+  createdBy          String?
+  creator            User?           @relation("CarCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+  updatedBy          String?
+  updater            User?           @relation("CarUpdater", fields: [updatedBy], references: [id], onDelete: SetNull)
+  deletedBy          String?
+  deleter            User?           @relation("CarDeleter", fields: [deletedBy], references: [id], onDelete: SetNull)
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  deletedAt          DateTime?
+
+  // Relations
+  specs              TechnicalSpecs?
+  sale               SaleDetails?
+  attachments        Attachment[]
+  reservations       Reservation[]
+
+  // Composite indexes for high-speed dynamic search and filtration
+  @@index([make, model, year])
+  @@index([branchId, status])
+  @@index([price, odometer])
+  @@index([isDeleted])
+}
+
+model Attachment {
+  id        String              @id @default(uuid())
+  carId     String
+  car       Car                 @relation(fields: [carId], references: [id], onDelete: Cascade)
+  name      String
+  type      String
+  url       String
+  size      String
+  category  String? // exterior_image, interior_image, etc.
+  version   Int                 @default(1)
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+  
+  // Relations
+  versions  AttachmentVersion[]
+
+  @@index([carId])
+}
+
+model AttachmentVersion {
+  id           String     @id @default(uuid())
+  attachmentId String
+  attachment   Attachment @relation(fields: [attachmentId], references: [id], onDelete: Cascade)
+  version      Int
+  url          String
+  size         String
+  createdAt    DateTime   @default(now())
+
+  @@index([attachmentId])
+}
+
+model Reservation {
+  id                 String            @id @default(uuid())
+  carId              String
+  car                Car               @relation(fields: [carId], references: [id], onDelete: Cascade)
+  customerName       String
+  customerPhone      String
+  nationalId         String
+  nationality        String
+  whatsApp           String
+  email              String
+  customerAddress    String
+  repInCharge        String
+  duration           Int
+  reason             String
+  notes              String?
+  reservationDate    DateTime          @default(now())
+  reservationEndDate DateTime
+  reservationStatus  ReservationStatus @default(ACTIVE)
+  createdByUserId    String
+  createdBy          User              @relation("CreatedByUser", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  @@index([carId])
+  @@index([createdByUserId])
+  @@index([nationalId])
+  @@index([customerPhone])
+  @@index([reservationStatus])
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Restrict)
+  userName  String
+  action    String
+  details   String
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  title     String
+  message   String
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([isRead])
+}
+
+model SystemSettings {
+  id           String       @id @default(uuid())
+  companyName  String
+  phone        String
+  email        String
+  currency     String       @default("SAR")
+  address      String
+  systemStatus SystemStatus @default(ACTIVE)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+}

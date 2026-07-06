@@ -1,0 +1,8 @@
+{
+  "name": "Car Stock System",
+  "description": "Professional Car Inventory Management System with real-time updates, reports, and role-based access control.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

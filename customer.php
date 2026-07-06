@@ -86,6 +86,12 @@ if (file_exists(CONFIG_PATH)) {
             // Column may already exist
         }
 
+        try {
+            $pdo->exec("ALTER TABLE `showroom_sales` ADD UNIQUE INDEX `idx_ss_phone_unique` (`phone`)");
+        } catch (Exception $e) {
+            // Index might already exist or table has duplicate records
+        }
+
         // Seed default sales representatives if empty
         $countSales = $pdo->query("SELECT COUNT(*) FROM `showroom_sales`")->fetchColumn();
         if ($countSales == 0) {

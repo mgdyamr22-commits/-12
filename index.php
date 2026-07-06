@@ -2486,6 +2486,30 @@ if (!isset($_SESSION['user_id'])):
         }
 
         if (!empty($name) && !empty($phone)) {
+            // Clean up the input phone number for accurate duplication matching
+            $clean_phone = preg_replace('/\D/', '', $phone);
+            if (str_starts_with($clean_phone, '00966')) {
+                $clean_phone = '0' . substr($clean_phone, 5);
+            } elseif (str_starts_with($clean_phone, '966')) {
+                $clean_phone = '0' . substr($clean_phone, 3);
+            } elseif (strlen($clean_phone) === 9 && str_starts_with($clean_phone, '5')) {
+                $clean_phone = '0' . $clean_phone;
+            }
+
+            // Check if phone already exists (using exact match, clean match, and MySQL REPLACE checks)
+            $stmtCheck = $pdo->prepare("
+                SELECT COUNT(*) FROM `showroom_sales` 
+                WHERE `phone` = ? 
+                   OR `phone` = ? 
+                   OR REPLACE(REPLACE(REPLACE(`phone`, ' ', ''), '-', ''), '+', '') = ?
+                   OR REPLACE(REPLACE(REPLACE(`phone`, ' ', ''), '-', ''), '+', '') LIKE ?
+            ");
+            $stmtCheck->execute([$phone, $clean_phone, $clean_phone, "%$clean_phone"]);
+            if ($stmtCheck->fetchColumn() > 0) {
+                header("Location: index.php?page=showroom_sales&rep_error=phone_exists");
+                exit;
+            }
+
             $stmt = $pdo->prepare("INSERT INTO `showroom_sales` (`name`, `title`, `phone`, `whatsapp`, `avatar`, `status`) VALUES (?, ?, ?, ?, ?, ?)");
             $stmt->execute([$name, $title, $phone, $whatsapp, $avatar, $status]);
             writeAuditLog($pdo, $user_id, $user_name, 'إضافة مندوب مبيعات', "تم إضافة مندوب المبيعات $name بنجاح.");
@@ -2517,6 +2541,33 @@ if (!isset($_SESSION['user_id'])):
         }
 
         if ($rep_id > 0 && !empty($name)) {
+            if (!empty($phone)) {
+                // Clean up the input phone number for accurate duplication matching
+                $clean_phone = preg_replace('/\D/', '', $phone);
+                if (str_starts_with($clean_phone, '00966')) {
+                    $clean_phone = '0' . substr($clean_phone, 5);
+                } elseif (str_starts_with($clean_phone, '966')) {
+                    $clean_phone = '0' . substr($clean_phone, 3);
+                } elseif (strlen($clean_phone) === 9 && str_starts_with($clean_phone, '5')) {
+                    $clean_phone = '0' . $clean_phone;
+                }
+
+                // Check if phone already exists for another representative
+                $stmtCheck = $pdo->prepare("
+                    SELECT COUNT(*) FROM `showroom_sales` 
+                    WHERE (`phone` = ? 
+                       OR `phone` = ? 
+                       OR REPLACE(REPLACE(REPLACE(`phone`, ' ', ''), '-', ''), '+', '') = ?
+                       OR REPLACE(REPLACE(REPLACE(`phone`, ' ', ''), '-', ''), '+', '') LIKE ?)
+                      AND `id` != ?
+                ");
+                $stmtCheck->execute([$phone, $clean_phone, $clean_phone, "%$clean_phone", $rep_id]);
+                if ($stmtCheck->fetchColumn() > 0) {
+                    header("Location: index.php?page=showroom_sales&rep_error=phone_exists");
+                    exit;
+                }
+            }
+
             $stmt = $pdo->prepare("UPDATE `showroom_sales` SET `name` = ?, `title` = ?, `phone` = ?, `whatsapp` = ?, `avatar` = ?, `status` = ? WHERE `id` = ?");
             $stmt->execute([$name, $title, $phone, $whatsapp, $avatar, $status, $rep_id]);
             writeAuditLog($pdo, $user_id, $user_name, 'تعديل مندوب مبيعات', "تم تعديل بيانات مندوب المبيعات $name رقم $rep_id.");
@@ -7264,6 +7315,12 @@ if (!isset($_SESSION['user_id'])):
                 </div>
 
                 <!-- Notifications -->
+                <?php if (isset($_GET['rep_error']) && $_GET['rep_error'] === 'phone_exists'): ?>
+                    <div class="p-4 bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs font-bold rounded-xl flex items-center gap-2">
+                        ⚠️ خطأ: رقم الهاتف مسجل مسبقاً لمستشار مبيعات آخر! يرجى استخدام رقم هاتف فريد لكل مندوب مبيعات لمنع التكرار في النظام.
+                    </div>
+                <?php endif; ?>
+
                 <?php if ($rep_success === 1): ?>
                     <div class="p-4 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-bold rounded-xl flex items-center gap-2">
                         ✓ تم إضافة مستشار المبيعات بنجاح إلى قاعدة البيانات وربطه بالمعرض.

@@ -32,7 +32,6 @@ function initDB(): DatabaseSchema {
   }
 
   if (!fs.existsSync(DB_FILE)) {
-    console.log('Database file not found. Creating a fresh database with 50 pre-seeded cars...');
     const seed = generateSeedData();
     fs.writeFileSync(DB_FILE, JSON.stringify(seed, null, 2), 'utf-8');
     return seed;
@@ -63,12 +62,12 @@ function initDB(): DatabaseSchema {
       }
 
       if (cleanedCount > 0) {
-        console.log(`[Self-Healing DB] Found and removed ${cleanedCount} duplicate cars by VIN.`);
         parsed.cars = uniqueCarsByVin;
         try {
           fs.writeFileSync(DB_FILE, JSON.stringify(parsed, null, 2), 'utf-8');
         } catch (writeErr) {
-          console.error('[Self-Healing DB] Failed to save cleaned database', writeErr);
+          // Logging failure to save cleaned database for monitoring
+          console.error('[Self-Healing DB] Failed to save cleaned database', writeErr); // skipcq: JS-0002
         }
       }
     }
@@ -87,7 +86,8 @@ function initDB(): DatabaseSchema {
     
     return parsed;
   } catch (err) {
-    console.error('Error reading database file. Re-initializing...', err);
+    // Logging database read error for monitoring
+    console.error('Error reading database file. Re-initializing...', err); // skipcq: JS-0002
     const seed = generateSeedData();
     fs.writeFileSync(DB_FILE, JSON.stringify(seed, null, 2), 'utf-8');
     return seed;

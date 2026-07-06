@@ -383,7 +383,6 @@ export default function CarCard({
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    console.log("CarCard: Edit button clicked for car:", car.id);
                     onEdit(car);
                   }}
                   className="py-1 rounded bg-slate-900 border border-slate-800 text-blue-400 hover:text-white font-bold text-[10px] hover:bg-blue-650 transition flex items-center justify-center gap-0.5 cursor-pointer"
@@ -394,7 +393,6 @@ export default function CarCard({
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    console.log("CarCard: Clone button clicked for car id:", car.id);
                     onClone(car.id);
                   }}
                   className="py-1 rounded bg-slate-900 border border-slate-800 text-indigo-400 hover:text-white font-bold text-[10px] hover:bg-indigo-650 transition flex items-center justify-center gap-0.5 cursor-pointer"
@@ -405,7 +403,6 @@ export default function CarCard({
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    console.log("CarCard: Delete button clicked for car id:", car.id);
                     onDelete(car.id);
                   }}
                   className="py-1 rounded bg-slate-900 border border-slate-800 text-rose-400 hover:text-white font-bold text-[10px] hover:bg-rose-650 transition flex items-center justify-center gap-0.5 cursor-pointer"

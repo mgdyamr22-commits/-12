@@ -45,8 +45,33 @@ class SecurityCore
         }
 
         if (self::$pdo) {
-            // 6. Perform Self-Healing Check (Database & Files integrity)
-            self::runSelfHealing();
+            // 6. Perform Self-Healing Check (Database & Files integrity) - Caching Layer
+            $cacheDir = dirname(self::$lockPath) . '/cache';
+            if (!is_dir($cacheDir)) {
+                @mkdir($cacheDir, 0755, true);
+            }
+            $cacheFile = $cacheDir . '/self_healing_last_run.json';
+            $runHealing = true;
+            if (file_exists($cacheFile)) {
+                $cacheData = json_decode(file_get_contents($cacheFile), true);
+                if (isset($cacheData['last_run']) && (time() - $cacheData['last_run'] < 3600)) {
+                    $runHealing = false;
+                }
+            }
+
+            if ($runHealing) {
+                $cliScript = __DIR__ . '/SecurityCli.php';
+                if (php_sapi_name() !== 'cli' && function_exists('exec') && file_exists($cliScript)) {
+                    // Start in the background asynchronously via CLI
+                    $cmd = "php " . escapeshellarg($cliScript) . " --task=self-healing > /dev/null 2>&1 &";
+                    @exec($cmd);
+                    @file_put_contents($cacheFile, json_encode(['last_run' => time()]));
+                } else {
+                    // Fast fallback inline execution
+                    self::runSelfHealing();
+                    @file_put_contents($cacheFile, json_encode(['last_run' => time()]));
+                }
+            }
         }
     }
 
@@ -81,7 +106,7 @@ class SecurityCore
 
     /**
      * Web Application Firewall (WAF) to detect and block common web application attacks.
-     * Prevents XSS, SQLi, LFI/RFI and Malicious Uploads.
+     * Prevents XSS, SQLi, LFI/RFI, Command Injection, and Malicious Uploads.
      */
     private static function runWaf()
     {
@@ -124,7 +149,7 @@ class SecurityCore
             }
         }
 
-        // 2. Define Attack Patterns (Regex signatures)
+        // 2. Define Multi-Layered Attack Signatures
         $signatures = [
             'SQL Injection' => [
                 '/union\s+(all\s+)?select/i',
@@ -134,7 +159,14 @@ class SecurityCore
                 '/concat\(.*char\(/i',
                 '/(\x27|\x22)\s*(or|and)\s+.*=.*(\x27|\x22)?/i',
                 '/benchmark\((.*)\,(.*)\)/i',
-                '/sleep\((.*)\)/i'
+                '/sleep\((.*)\)/i',
+                '/waitfor\s+delay\s+(\x27|\x22).+(\x27|\x22)/i',
+                '/extractvalue\s*\(|updatexml\s*\(/i',
+                '/into\s+outfile|into\s+dumpfile/i',
+                '/or\s+\d+=\d+/i',
+                '/or\s+(\x27|\x22).+=(\x27|\x22).+/i',
+                '/exec\s+xp_cmdshell/i',
+                '/\/\*!\d{5}\w+\*\//i' // SQL comments bypass tricks like /*!50000SELECT*/
             ],
             'Cross-Site Scripting (XSS)' => [
                 '/<script\b[^>]*>/i',
@@ -142,20 +174,40 @@ class SecurityCore
                 '/onerror\s*=/i',
                 '/onload\s*=/i',
                 '/onmouseover\s*=/i',
+                '/onfocus\s*=/i',
                 '/document\.cookie/i',
                 '/window\.location/i',
-                '/alert\(/i'
+                '/alert\(/i',
+                '/eval\((.*)\)/i',
+                '/src\s*=\s*(\x27|\x22)?\s*javascript\s*:/i',
+                '/href\s*=\s*(\x27|\x22)?\s*javascript\s*:/i',
+                '/<iframe|<object|<embed|<applet/i',
+                '/String\.fromCharCode/i',
+                '/prompt\s*\(|confirm\s*\(/i'
             ],
             'Path Traversal / LFI' => [
                 '/\.\.\/\.\.\//',
                 '/\.\.\\\\\.\.\\\\/',
+                '/\.\.\//',
+                '/\.\.\\\\/',
                 '/etc\/passwd/i',
                 '/boot\.ini/i',
-                '/win\.ini/i'
+                '/win\.ini/i',
+                '/php:\/\/filter/i',
+                '/php:\/\/input/i',
+                '/phar:\/\//i',
+                '/data:\/\/text\/plain/i'
+            ],
+            'Command Injection' => [
+                '/system\s*\(|shell_exec\s*\(|passthru\s*\(|exec\s*\(|popen\s*\(|proc_open\s*\(/i',
+                '/\;\s*(cat|id|whoami|uname|ping|curl|wget)\s+/i',
+                '/\&\&\s*(cat|id|whoami|uname|ping|curl|wget)\s+/i',
+                '/\|\s*(cat|id|whoami|uname|ping|curl|wget)\s+/i',
+                '/\$\((cat|id|whoami|uname|ping|curl|wget)/i'
             ]
         ];
 
-        // 3. Scan HTTP request parameters
+        // 3. Scan HTTP request parameters with Multi-Layered normalization
         $inputsToScan = [
             'GET' => $_GET,
             'POST' => $_POST,
@@ -163,21 +215,100 @@ class SecurityCore
             'URI' => ['uri' => $requestUri]
         ];
 
+        // Detect if active session is an administrator to allow styling custom JS/CSS in parameters safely
+        $isAdmin = false;
+        if (session_status() !== PHP_SESSION_NONE || isset($_COOKIE[session_name()])) {
+            if (session_status() === PHP_SESSION_NONE) {
+                @session_start();
+            }
+            $isAdmin = isset($_SESSION['user_role']) && $_SESSION['user_role'] === 'admin';
+        }
+
         foreach ($inputsToScan as $source => $inputData) {
             foreach ($inputData as $key => $value) {
+                // Safeguard administrators' custom options
+                if ($isAdmin && is_string($key) && (str_starts_with($key, 'showroom_custom_') || $key === 'notes' || $key === 'description')) {
+                    continue;
+                }
+
                 if (is_array($value)) {
                     $value = json_encode($value);
                 }
-                
+
+                if (!is_string($value) || empty($value)) {
+                    continue;
+                }
+
+                // Normalization Layers
+                $normResult = self::normalizeInputForWaf($value);
+                $normalized = $normResult['normalized'];
+                $noComments = $normResult['no_comments'];
+
                 foreach ($signatures as $attackType => $patterns) {
                     foreach ($patterns as $pattern) {
-                        if (preg_match($pattern, $value)) {
-                            self::logAndBlockAttack($attackType, "تم رصد محاولة هجوم من نوع $attackType في مصدر $source ($key) بالقيمة المعطاة.");
+                        // Check original, normalized, and stripped comments versions
+                        if (preg_match($pattern, $value) || preg_match($pattern, $normalized) || preg_match($pattern, $noComments)) {
+                            self::logAndBlockAttack($attackType, "تم رصد محاولة هجوم من نوع $attackType في مصدر $source ($key) بالقيمة المعطاة بعد الفحص متعدد الطبقات.");
                         }
                     }
                 }
             }
         }
+    }
+
+    /**
+     * Normalizes inputs for multiple decoding and bypass formats.
+     */
+    private static function normalizeInputForWaf($value) {
+        if (!is_string($value)) {
+            return ['original' => $value, 'normalized' => $value, 'no_comments' => $value];
+        }
+
+        $normalized = $value;
+
+        // 1. Recursive URL Decode (up to 3 times for nested encodings)
+        for ($i = 0; $i < 3; $i++) {
+            $decoded = rawurldecode($normalized);
+            if ($decoded === $normalized) {
+                break;
+            }
+            $normalized = $decoded;
+        }
+
+        // 2. Decode Unicode escape sequences (e.g., %u0027, \u0027, \u{0027})
+        $normalized = preg_replace_callback('/%u([0-9a-fA-F]{4})/', function ($matches) {
+            return mb_convert_encoding(pack('H*', $matches[1]), 'UTF-8', 'UCS-2BE');
+        }, $normalized);
+
+        $normalized = preg_replace_callback('/\\\\u([0-9a-fA-F]{4})/', function ($matches) {
+            return mb_convert_encoding(pack('H*', $matches[1]), 'UTF-8', 'UCS-2BE');
+        }, $normalized);
+
+        // 3. Decode Hex encodings (e.g., \x27, 0x27)
+        $normalized = preg_replace_callback('/\\\\x([0-9a-fA-F]{2})/', function ($matches) {
+            return chr(hexdec($matches[1]));
+        }, $normalized);
+
+        // 4. Handle HTML Entities (e.g., &lt;, &#x27;)
+        $normalized = html_entity_decode($normalized, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+
+        // 5. Detect and decode base64 payloads
+        if (preg_match('/^[a-zA-Z0-9\/+]{12,}=*$/', trim($value))) {
+            $decodedBase64 = @base64_decode(trim($value), true);
+            if ($decodedBase64 !== false && preg_match('//u', $decodedBase64)) {
+                $normalized .= ' [B64_DECODED: ' . $decodedBase64 . ']';
+            }
+        }
+
+        // 6. Strip / Normalize SQL Comments to detect obfuscated words
+        $noComments = preg_replace('/\/\*.*?\*\//s', '', $normalized);
+        $noComments = preg_replace('/--.*?(\n|$)/s', ' ', $noComments);
+        
+        return [
+            'original' => $value,
+            'normalized' => $normalized,
+            'no_comments' => $noComments
+        ];
     }
 
     /**
@@ -1003,5 +1134,26 @@ class SecurityCore
     public static function escape($string)
     {
         return htmlspecialchars($string, ENT_QUOTES, 'UTF-8');
+    }
+
+    /**
+     * Forces self-healing (called via SecurityCli or background processes).
+     */
+    public static function forceSelfHealing()
+    {
+        self::runSelfHealing();
+    }
+
+    /**
+     * Logs security alerts from external background tasks or scanners.
+     */
+    public static function logSecurityAlert($action, $details)
+    {
+        if (self::$pdo) {
+            try {
+                $stmt = self::$pdo->prepare("INSERT INTO `system_logs` (`user_id`, `user_name`, `action`, `details`, `risk_level`, `ip`) VALUES ('CLI_SEC', 'مدقق الأمان والمهام الخلفية', ?, ?, 'high', ?)");
+                $stmt->execute([$action, $details, $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1']);
+            } catch (Exception $e) {}
+        }
     }
 }

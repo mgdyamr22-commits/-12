@@ -99,6 +99,48 @@ if (file_exists(CONFIG_PATH)) {
             $stmtInsertSales->execute(['أحمد الحربي', 'مستشار المبيعات - فرع الرياض', '0500000001', '966500000001', 'active', 1]);
             $stmtInsertSales->execute(['ياسر اليامي', 'مستشار المبيعات - فرع نجران', '0500000002', '966500000002', 'active', 2]);
         }
+
+        // Normalize existing showroom_sales records via PHP for maximum database compatibility
+        try {
+            $reps = $pdo->query("SELECT `id`, `phone`, `whatsapp` FROM `showroom_sales`")->fetchAll(PDO::FETCH_ASSOC);
+            $stmtUpdate = $pdo->prepare("UPDATE `showroom_sales` SET `phone` = ?, `whatsapp` = ? WHERE `id` = ?");
+            foreach ($reps as $rep) {
+                $p = trim($rep['phone']);
+                $w = trim($rep['whatsapp'] ?? '');
+                
+                // Normalize phone
+                $p_digits = preg_replace('/\D/', '', $p);
+                if (str_starts_with($p_digits, '00966')) {
+                    $p_digits = '0' . substr($p_digits, 5);
+                } elseif (str_starts_with($p_digits, '966')) {
+                    $p_digits = '0' . substr($p_digits, 3);
+                } elseif (str_starts_with($p_digits, '0')) {
+                    // Keep
+                } elseif (strlen($p_digits) === 9 && str_starts_with($p_digits, '5')) {
+                    $p_digits = '0' . $p_digits;
+                }
+                
+                // Normalize whatsapp
+                $w_digits = preg_replace('/\D/', '', $w);
+                if (!empty($w_digits)) {
+                    if (str_starts_with($w_digits, '00966')) {
+                        $w_digits = substr($w_digits, 2);
+                    } elseif (str_starts_with($w_digits, '966')) {
+                        // Keep
+                    } elseif (str_starts_with($w_digits, '0')) {
+                        $w_digits = '966' . substr($w_digits, 1);
+                    } else {
+                        $w_digits = '966' . $w_digits;
+                    }
+                }
+                
+                if ($p_digits !== $p || $w_digits !== $w) {
+                    $stmtUpdate->execute([$p_digits, $w_digits, $rep['id']]);
+                }
+            }
+        } catch (Exception $e) {
+            // Ignore if anything fails
+        }
         
     } catch (PDOException $e) {
         $db_error = $e->getMessage();

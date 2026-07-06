@@ -670,6 +670,48 @@ try {
             $stmtInsertSales->execute(['ياسر اليامي', 'مستشار المبيعات - فرع نجران', '0500000002', '966500000002', 'active', 2]);
         }
 
+        // Normalize existing showroom_sales records via PHP for maximum database compatibility
+        try {
+            $reps = $pdo->query("SELECT `id`, `phone`, `whatsapp` FROM `showroom_sales`")->fetchAll(PDO::FETCH_ASSOC);
+            $stmtUpdate = $pdo->prepare("UPDATE `showroom_sales` SET `phone` = ?, `whatsapp` = ? WHERE `id` = ?");
+            foreach ($reps as $rep) {
+                $p = trim($rep['phone']);
+                $w = trim($rep['whatsapp'] ?? '');
+                
+                // Normalize phone
+                $p_digits = preg_replace('/\D/', '', $p);
+                if (str_starts_with($p_digits, '00966')) {
+                    $p_digits = '0' . substr($p_digits, 5);
+                } elseif (str_starts_with($p_digits, '966')) {
+                    $p_digits = '0' . substr($p_digits, 3);
+                } elseif (str_starts_with($p_digits, '0')) {
+                    // Keep
+                } elseif (strlen($p_digits) === 9 && str_starts_with($p_digits, '5')) {
+                    $p_digits = '0' . $p_digits;
+                }
+                
+                // Normalize whatsapp
+                $w_digits = preg_replace('/\D/', '', $w);
+                if (!empty($w_digits)) {
+                    if (str_starts_with($w_digits, '00966')) {
+                        $w_digits = substr($w_digits, 2);
+                    } elseif (str_starts_with($w_digits, '966')) {
+                        // Keep
+                    } elseif (str_starts_with($w_digits, '0')) {
+                        $w_digits = '966' . substr($w_digits, 1);
+                    } else {
+                        $w_digits = '966' . $w_digits;
+                    }
+                }
+                
+                if ($p_digits !== $p || $w_digits !== $w) {
+                    $stmtUpdate->execute([$p_digits, $w_digits, $rep['id']]);
+                }
+            }
+        } catch (Exception $e) {
+            // Ignore if anything fails
+        }
+
         // Seed default SEO configuration for customer showroom
         $countSeo = $pdo->query("SELECT COUNT(*) FROM `seo_pages` WHERE `page_key` = 'customer_showroom'")->fetchColumn();
         if ($countSeo == 0) {
@@ -2486,29 +2528,48 @@ if (!isset($_SESSION['user_id'])):
         }
 
         if (!empty($name) && !empty($phone)) {
-            // Clean up the input phone number for accurate duplication matching
+            // Clean up and normalize the input phone number
             $clean_phone = preg_replace('/\D/', '', $phone);
             if (str_starts_with($clean_phone, '00966')) {
-                $clean_phone = '0' . substr($clean_phone, 5);
+                $clean_phone = substr($clean_phone, 5);
             } elseif (str_starts_with($clean_phone, '966')) {
-                $clean_phone = '0' . substr($clean_phone, 3);
-            } elseif (strlen($clean_phone) === 9 && str_starts_with($clean_phone, '5')) {
-                $clean_phone = '0' . $clean_phone;
+                $clean_phone = substr($clean_phone, 3);
+            } elseif (str_starts_with($clean_phone, '0')) {
+                $clean_phone = substr($clean_phone, 1);
             }
+            // Standardize phone to 05xxxxxxxx
+            $normalized_phone = '0' . $clean_phone;
 
-            // Check if phone already exists (using exact match, clean match, and MySQL REPLACE checks)
+            // Clean up and normalize the input whatsapp number
+            $clean_whatsapp = preg_replace('/\D/', '', $whatsapp);
+            if (str_starts_with($clean_whatsapp, '00966')) {
+                $clean_whatsapp = substr($clean_whatsapp, 5);
+            } elseif (str_starts_with($clean_whatsapp, '966')) {
+                $clean_whatsapp = substr($clean_whatsapp, 3);
+            } elseif (str_starts_with($clean_whatsapp, '0')) {
+                $clean_whatsapp = substr($clean_whatsapp, 1);
+            }
+            // Standardize whatsapp to 9665xxxxxxxx
+            $normalized_whatsapp = '966' . $clean_whatsapp;
+
+            // Check if phone already exists (using multiple formats for 100% reliable matching)
             $stmtCheck = $pdo->prepare("
                 SELECT COUNT(*) FROM `showroom_sales` 
                 WHERE `phone` = ? 
                    OR `phone` = ? 
+                   OR `phone` = ?
                    OR REPLACE(REPLACE(REPLACE(`phone`, ' ', ''), '-', ''), '+', '') = ?
                    OR REPLACE(REPLACE(REPLACE(`phone`, ' ', ''), '-', ''), '+', '') LIKE ?
             ");
-            $stmtCheck->execute([$phone, $clean_phone, $clean_phone, "%$clean_phone"]);
+            $stmtCheck->execute([$normalized_phone, '0' . $clean_phone, $phone, $clean_phone, "%$clean_phone"]);
             if ($stmtCheck->fetchColumn() > 0) {
                 header("Location: index.php?page=showroom_sales&rep_error=phone_exists");
                 exit;
             }
+
+            // Save normalized values to the database to preserve clean state
+            $phone = $normalized_phone;
+            $whatsapp = $normalized_whatsapp;
 
             $stmt = $pdo->prepare("INSERT INTO `showroom_sales` (`name`, `title`, `phone`, `whatsapp`, `avatar`, `status`) VALUES (?, ?, ?, ?, ?, ?)");
             $stmt->execute([$name, $title, $phone, $whatsapp, $avatar, $status]);
@@ -2542,30 +2603,49 @@ if (!isset($_SESSION['user_id'])):
 
         if ($rep_id > 0 && !empty($name)) {
             if (!empty($phone)) {
-                // Clean up the input phone number for accurate duplication matching
+                // Clean up and normalize the input phone number
                 $clean_phone = preg_replace('/\D/', '', $phone);
                 if (str_starts_with($clean_phone, '00966')) {
-                    $clean_phone = '0' . substr($clean_phone, 5);
+                    $clean_phone = substr($clean_phone, 5);
                 } elseif (str_starts_with($clean_phone, '966')) {
-                    $clean_phone = '0' . substr($clean_phone, 3);
-                } elseif (strlen($clean_phone) === 9 && str_starts_with($clean_phone, '5')) {
-                    $clean_phone = '0' . $clean_phone;
+                    $clean_phone = substr($clean_phone, 3);
+                } elseif (str_starts_with($clean_phone, '0')) {
+                    $clean_phone = substr($clean_phone, 1);
                 }
+                // Standardize phone to 05xxxxxxxx
+                $normalized_phone = '0' . $clean_phone;
+
+                // Clean up and normalize the input whatsapp number
+                $clean_whatsapp = preg_replace('/\D/', '', $whatsapp);
+                if (str_starts_with($clean_whatsapp, '00966')) {
+                    $clean_whatsapp = substr($clean_whatsapp, 5);
+                } elseif (str_starts_with($clean_whatsapp, '966')) {
+                    $clean_whatsapp = substr($clean_whatsapp, 3);
+                } elseif (str_starts_with($clean_whatsapp, '0')) {
+                    $clean_whatsapp = substr($clean_whatsapp, 1);
+                }
+                // Standardize whatsapp to 9665xxxxxxxx
+                $normalized_whatsapp = '966' . $clean_whatsapp;
 
                 // Check if phone already exists for another representative
                 $stmtCheck = $pdo->prepare("
                     SELECT COUNT(*) FROM `showroom_sales` 
-                    WHERE (`phone` = ? 
+                    WHERE ( `phone` = ? 
                        OR `phone` = ? 
+                       OR `phone` = ?
                        OR REPLACE(REPLACE(REPLACE(`phone`, ' ', ''), '-', ''), '+', '') = ?
-                       OR REPLACE(REPLACE(REPLACE(`phone`, ' ', ''), '-', ''), '+', '') LIKE ?)
+                       OR REPLACE(REPLACE(REPLACE(`phone`, ' ', ''), '-', ''), '+', '') LIKE ? )
                       AND `id` != ?
                 ");
-                $stmtCheck->execute([$phone, $clean_phone, $clean_phone, "%$clean_phone", $rep_id]);
+                $stmtCheck->execute([$normalized_phone, '0' . $clean_phone, $phone, $clean_phone, "%$clean_phone", $rep_id]);
                 if ($stmtCheck->fetchColumn() > 0) {
                     header("Location: index.php?page=showroom_sales&rep_error=phone_exists");
                     exit;
                 }
+
+                // Save clean normalized values
+                $phone = $normalized_phone;
+                $whatsapp = $normalized_whatsapp;
             }
 
             $stmt = $pdo->prepare("UPDATE `showroom_sales` SET `name` = ?, `title` = ?, `phone` = ?, `whatsapp` = ?, `avatar` = ?, `status` = ? WHERE `id` = ?");
